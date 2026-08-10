@@ -1,0 +1,21 @@
+{
+  "name": "aivorah-world-and-you-service",
+  "version": "1.0.0",
+  "description": "Aivorah World & You — standalone microservice (GK facts, On This Day, Current Affairs, comprehension quiz)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.100.0",
+    "axios": "^1.7.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "groq-sdk": "^0.7.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}

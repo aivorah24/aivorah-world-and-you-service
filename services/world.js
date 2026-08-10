@@ -1,0 +1,189 @@
+const Groq  = require('groq-sdk');
+const axios = require('axios');
+
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+// Simple in-memory cache — one entry per date+grade
+const cache = {};
+
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// ── Grade → age mapping for age-appropriate content ─────────────────
+const GRADE_INFO = {
+  'Grade 1': { age: '6-7',  tone: 'very simple, short sentences, familiar topics like animals and colors' },
+  'Grade 2': { age: '7-8',  tone: 'simple language, relatable everyday examples' },
+  'Grade 3': { age: '8-9',  tone: 'curious explorers, fun facts, vivid descriptions, exciting tone' },
+  'Grade 4': { age: '9-10', tone: 'more detail, comparisons, slightly complex ideas' },
+  'Grade 5': { age: '10-11', tone: 'deeper explanations, cause-and-effect, broader world view' },
+  'Grade 6': { age: '11-12', tone: 'analytical thinking, global awareness, scientific reasoning' },
+  'Grade 7': { age: '12-13', tone: 'critical thinking, connecting concepts across subjects' },
+  'Grade 8': { age: '13-14', tone: 'mature reasoning, real-world applications, nuanced understanding' },
+  'Grade 9': { age: '14-15', tone: 'advanced concepts, current global issues, research-style' },
+};
+
+function gradeInfo(grade) {
+  return GRADE_INFO[grade] || GRADE_INFO['Grade 3'];
+}
+
+// ── Grade-specific NewsAPI config ───────────────────────────────────
+const GRADE_NEWS = {
+  'Grade 1': { category: 'science', focus: 'animals, nature, colorful discoveries' },
+  'Grade 2': { category: 'science', focus: 'animals, nature, fun experiments' },
+  'Grade 3': { category: 'science', focus: 'animals, nature, space discoveries' },
+  'Grade 4': { category: 'health',  focus: 'human body, environment, health discoveries' },
+  'Grade 5': { category: 'technology', focus: 'technology, AI, inventions, innovation' },
+  'Grade 6': { category: 'technology', focus: 'technology, science breakthroughs, environment' },
+  'Grade 7': { category: 'science', focus: 'science, global events, engineering' },
+  'Grade 8': { category: 'technology', focus: 'technology, world affairs, innovation' },
+  'Grade 9': { category: 'science', focus: 'research, global issues, scientific method' },
+};
+
+function gradeNews(grade) {
+  return GRADE_NEWS[grade] || GRADE_NEWS['Grade 3'];
+}
+
+// ── Fetch current affairs from NewsAPI → simplify with Groq ─────────
+async function fetchCurrentAffairs(grade) {
+  const NEWS_API_KEY = process.env.NEWS_API_KEY;
+  const info = gradeInfo(grade);
+  const news = gradeNews(grade);
+
+  // Fallback if no API key
+  if (!NEWS_API_KEY) return generateAffairsFallback(grade);
+
+  try {
+    const resp = await axios.get('https://newsapi.org/v2/top-headlines', {
+      params: { category: news.category, pageSize: 10, apiKey: NEWS_API_KEY },
+      timeout: 6000,
+    });
+
+    const EXCLUDE = ['pokemon','nintendo','game','xbox','playstation','esport','anime',
+      'manga','movie','celebrity','kardashian','murder','kill','death','attack','war'];
+    const articles = (resp.data.articles || []).filter(a => {
+      if (!a.title || !a.description || a.title.includes('[Removed]')) return false;
+      const lower = (a.title + ' ' + a.description).toLowerCase();
+      return !EXCLUDE.some(kw => lower.includes(kw));
+    });
+
+    if (articles.length < 2) return generateAffairsFallback(grade);
+
+    // Pick top 2 articles and simplify for kids
+    const top = articles.slice(0, 4);
+    const simplified = await groq.chat.completions.create({
+      model: 'llama-3.1-8b-instant',
+      messages: [{
+        role: 'system',
+        content: `You simplify news for ${grade} kids (age ${info.age}). ${info.tone}.
+Rewrite these articles in friendly, positive, educational language.
+Respond ONLY with valid JSON array — no markdown:
+[{"headline":"short kid-friendly title","detail":"1-2 simple sentences"}]`,
+      }, {
+        role: 'user',
+        content: top.map((a, i) => `${i+1}. ${a.title}: ${a.description}`).join('\n'),
+      }],
+      temperature: 0.3,
+      max_tokens: 300,
+    });
+
+    const raw = simplified.choices[0].message.content.trim();
+    const clean = raw.replace(/```json\n?/g, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(clean);
+    return Array.isArray(parsed) ? parsed.slice(0, 2) : [parsed];
+  } catch {
+    return generateAffairsFallback(grade);
+  }
+}
+
+// ── Fallback: Groq generates current affairs ────────────────────────
+async function generateAffairsFallback(grade) {
+  const info = gradeInfo(grade);
+  const resp = await groq.chat.completions.create({
+    model: 'llama-3.1-8b-instant',
+    messages: [{
+      role: 'system',
+      content: `You share positive world news for ${grade} kids (age ${info.age}). ${info.tone}.
+Generate 2 recent positive world events or discoveries.
+Respond ONLY with valid JSON — no markdown:
+[{"headline":"...","detail":"..."},{"headline":"...","detail":"..."}]`,
+    }, {
+      role: 'user',
+      content: `Current affairs for ${grade}`,
+    }],
+    temperature: 0.7,
+    max_tokens: 250,
+  });
+  try {
+    const raw = resp.choices[0].message.content.trim();
+    const clean = raw.replace(/```json\n?/g, '').replace(/```/g, '').trim();
+    return JSON.parse(clean);
+  } catch {
+    return [{ headline: 'World News', detail: 'Check back soon for today\'s top stories!' }];
+  }
+}
+
+// ── Generate On This Day + GK Fact + Fun Challenge via Groq ─────────
+async function generateGroqContent(grade) {
+  const info  = gradeInfo(grade);
+  const today = new Date();
+  const month = today.toLocaleString('en-US', { month: 'long' });
+  const day   = today.getDate();
+  const year  = today.getFullYear();
+
+  const GK_CATEGORIES = ['Science', 'Nature', 'Space', 'History', 'Geography', 'Animals'];
+  const category = GK_CATEGORIES[today.getDate() % GK_CATEGORIES.length];
+
+  const prompt = `You are Ms. Zara, a warm teacher for ${grade} students (age ${info.age}).
+Today is ${month} ${day}, ${year}. Content style: ${info.tone}.
+
+Generate:
+1. **On This Day** — 3 REAL historically accurate events on ${month} ${day}. Mix science, culture, sports. Each 1-2 sentences appropriate for age ${info.age}.
+2. **GK Fact** — One amazing ${category} fact for a ${grade} student. Vivid, relatable.
+3. **Fun Challenge** — One thinking question with answer, appropriate for age ${info.age}.
+
+Respond ONLY with valid JSON — no markdown, no backticks:
+{"onThisDay":[{"year":1969,"fact":"..."},{"year":2004,"fact":"..."},{"year":1858,"fact":"..."}],"gkFact":{"title":"...","fact":"...","category":"${category}"},"funChallenge":{"question":"...","answer":"..."}}`;
+
+  const resp = await groq.chat.completions.create({
+    model: 'llama-3.1-8b-instant',
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.7,
+    max_tokens: 600,
+  });
+
+  const raw   = resp.choices[0].message.content.trim();
+  const clean = raw.replace(/```json\n?/g, '').replace(/```/g, '').trim();
+  const match = clean.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('No JSON in response');
+  return JSON.parse(match[0]);
+}
+
+async function getWorldDaily(grade) {
+  const key = `${todayKey()}_${grade}`;
+
+  if (cache[key]) return cache[key];
+
+  const [groqData, currentAffairs] = await Promise.all([
+    generateGroqContent(grade),
+    fetchCurrentAffairs(grade),
+  ]);
+
+  const today = new Date();
+  const month = today.toLocaleString('en-US', { month: 'long' });
+  const day   = today.getDate();
+
+  const data = {
+    date: `${month} ${day}`,
+    grade,
+    onThisDay:      groqData.onThisDay || [],
+    gkFact:         groqData.gkFact || { title: 'Did You Know?', fact: 'Loading...', category: 'Science' },
+    currentAffairs: currentAffairs || [],
+    funChallenge:   groqData.funChallenge || { question: 'Think about it!', answer: 'Keep exploring!' },
+  };
+
+  cache[key] = data;
+  return data;
+}
+
+module.exports = { getWorldDaily };
