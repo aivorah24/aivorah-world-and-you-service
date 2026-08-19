@@ -12,6 +12,10 @@ app.use('/daily-tidbit', require('./routes/daily-tidbit'));
 app.use('/world',        require('./routes/world'));
 
 const PORT = process.env.PORT || 3010;
-app.listen(PORT, () => {
-  console.log(`Aivorah World & You service running on http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Aivorah World & You service running on http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;
