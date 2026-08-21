@@ -149,7 +149,14 @@ Respond ONLY with valid JSON — no markdown, no backticks:
     model: 'openai/gpt-oss-20b',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
-    max_tokens: 600,
+    // gpt-oss-20b is a reasoning model — it can spend part of the token
+    // budget on an internal "thinking" preamble before the actual answer.
+    // At 600 that preamble was eating the whole budget, truncating the
+    // response before the JSON ever appeared ("No JSON in response",
+    // confirmed live on /world/daily after the Aug-16 Groq model migration).
+    // Raised well above what the actual JSON needs (a few hundred tokens)
+    // to leave headroom for that preamble.
+    max_tokens: 2000,
   });
 
   const raw   = resp.choices[0].message.content.trim();
