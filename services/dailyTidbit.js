@@ -39,7 +39,7 @@ async function generateGKFact(grade) {
   const rules    = ageRule(grade);
 
   const resp = await groq.chat.completions.create({
-    model: 'llama-3.1-8b-instant',
+    model: 'openai/gpt-oss-20b',
     messages: [
       {
         role: 'system',
@@ -133,7 +133,7 @@ async function fetchCurrentAffairs(grade) {
     const articleList = articles.slice(0, 5).map((a, i) => `${i + 1}. ${a.title}`).join('\n');
 
     const pickResp = await groq.chat.completions.create({
-      model: 'llama-3.1-8b-instant',
+      model: 'openai/gpt-oss-20b',
       messages: [
         {
           role: 'system',
@@ -149,7 +149,7 @@ async function fetchCurrentAffairs(grade) {
     const article   = articles[Math.max(0, Math.min(pickedIdx || 0, articles.length - 1))];
 
     const simplified = await groq.chat.completions.create({
-      model: 'llama-3.1-8b-instant',
+      model: 'openai/gpt-oss-20b',
       messages: [
         {
           role: 'system',
@@ -184,7 +184,7 @@ async function generateCurrentAffairsFallback(grade) {
   const rules = ageRule(grade);
 
   const resp = await groq.chat.completions.create({
-    model: 'llama-3.1-8b-instant',
+    model: 'openai/gpt-oss-20b',
     messages: [
       {
         role: 'system',
@@ -289,7 +289,7 @@ function normalizeQuizQuestions(questions) {
 async function generateComprehensionQuiz({ headline, summary, grade = 'Grade 3' }) {
   const rules = ageRule(grade);
   const resp = await groq.chat.completions.create({
-    model: 'llama-3.1-8b-instant',
+    model: 'openai/gpt-oss-20b',
     messages: [
       {
         role: 'system',

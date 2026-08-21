@@ -72,7 +72,7 @@ async function fetchCurrentAffairs(grade) {
     // Pick top 2 articles and simplify for kids
     const top = articles.slice(0, 4);
     const simplified = await groq.chat.completions.create({
-      model: 'llama-3.1-8b-instant',
+      model: 'openai/gpt-oss-20b',
       messages: [{
         role: 'system',
         content: `You simplify news for ${grade} kids (age ${info.age}). ${info.tone}.
@@ -100,7 +100,7 @@ Respond ONLY with valid JSON array — no markdown:
 async function generateAffairsFallback(grade) {
   const info = gradeInfo(grade);
   const resp = await groq.chat.completions.create({
-    model: 'llama-3.1-8b-instant',
+    model: 'openai/gpt-oss-20b',
     messages: [{
       role: 'system',
       content: `You share positive world news for ${grade} kids (age ${info.age}). ${info.tone}.
@@ -146,7 +146,7 @@ Respond ONLY with valid JSON — no markdown, no backticks:
 {"onThisDay":[{"year":1969,"fact":"..."},{"year":2004,"fact":"..."},{"year":1858,"fact":"..."}],"gkFact":{"title":"...","fact":"...","category":"${category}"},"funChallenge":{"question":"...","answer":"..."}}`;
 
   const resp = await groq.chat.completions.create({
-    model: 'llama-3.1-8b-instant',
+    model: 'openai/gpt-oss-20b',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
     max_tokens: 600,
