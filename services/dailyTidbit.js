@@ -22,10 +22,23 @@ function cacheKey(grade) {
 }
 
 // ── Age instructions per grade ───────────────────────────────────────
+// Previously only covered Grades 3-5 — every other grade (1, 2, 6, 7, 8, 9,
+// 10, 11, 12) silently fell back to Grade 3's "age 8-9, very simple words"
+// rule. Confirmed root cause of a Grade 11 student seeing primary-school-
+// level GK facts — not a model/prompt issue, a missing lookup entry.
 const AGE_RULES = {
+  'Grade 1': 'The student is age 6-7. Use very simple words and short sentences. Familiar topics like animals and colors.',
+  'Grade 2': 'The student is age 7-8. Simple language, relatable everyday examples.',
   'Grade 3': 'The student is age 8-9. Use very simple words. Maximum 2 short sentences. Fun and exciting tone.',
   'Grade 4': 'The student is age 9-10. Use clear simple language. 2 sentences with one interesting detail.',
   'Grade 5': 'The student is age 10-11. Clear language, slightly more detail allowed. 2-3 sentences.',
+  'Grade 6': 'The student is age 11-12. Analytical tone, global awareness, scientific reasoning.',
+  'Grade 7': 'The student is age 12-13. Critical thinking, connecting concepts across subjects.',
+  'Grade 8': 'The student is age 13-14. Mature reasoning, real-world applications, nuanced understanding.',
+  'Grade 9': 'The student is age 14-15. Advanced concepts, current global issues, research-style tone.',
+  'Grade 10': 'The student is age 15-16. Exam-level rigor, structured analytical reasoning.',
+  'Grade 11': 'The student is age 16-17. Pre-university complexity, genuine critical analysis — IB DP / Std XI depth. Never simplify to primary-school level.',
+  'Grade 12': 'The student is age 17-18. University-preparatory, sophisticated reasoning — IB DP / Std XII depth. Never simplify to primary-school level.',
 };
 function ageRule(grade) {
   return AGE_RULES[grade] || AGE_RULES['Grade 3'];
@@ -77,7 +90,19 @@ Respond ONLY with valid JSON — no markdown, no extra text:
 }
 
 // ── Grade-specific NewsAPI config ───────────────────────────────────
+// Same gap as AGE_RULES above — only 3-5 were covered; extended to the full
+// Grade 1-12 range so higher grades stop silently getting Grade 3's config.
 const GRADE_NEWS_CONFIG = {
+  'Grade 1': {
+    category: 'science',
+    focusHint: 'animals, nature, colorful discoveries',
+    audienceHint: 'The student is age 6-7. Keep it very simple and picture-friendly.',
+  },
+  'Grade 2': {
+    category: 'science',
+    focusHint: 'animals, nature, fun experiments',
+    audienceHint: 'The student is age 7-8. Simple language, relatable everyday examples.',
+  },
   'Grade 3': {
     category: 'science',
     focusHint: 'animals, nature, space discoveries, or cute/fun science',
@@ -92,6 +117,41 @@ const GRADE_NEWS_CONFIG = {
     category: 'technology',
     focusHint: 'technology, AI, inventions, world events, or innovation',
     audienceHint: 'The student is age 10-11. They are ready for technology news, global events, and scientific breakthroughs.',
+  },
+  'Grade 6': {
+    category: 'technology',
+    focusHint: 'technology, science breakthroughs, environment',
+    audienceHint: 'The student is age 11-12. Analytical tone, global awareness.',
+  },
+  'Grade 7': {
+    category: 'science',
+    focusHint: 'science, global events, engineering',
+    audienceHint: 'The student is age 12-13. Critical thinking, connecting concepts across subjects.',
+  },
+  'Grade 8': {
+    category: 'technology',
+    focusHint: 'technology, world affairs, innovation',
+    audienceHint: 'The student is age 13-14. Mature reasoning, real-world applications.',
+  },
+  'Grade 9': {
+    category: 'science',
+    focusHint: 'research, global issues, scientific method',
+    audienceHint: 'The student is age 14-15. Advanced concepts, current global issues, research-style tone.',
+  },
+  'Grade 10': {
+    category: 'science',
+    focusHint: 'exam-relevant science, world affairs, technology trends',
+    audienceHint: 'The student is age 15-16. Exam-level rigor, structured analytical reasoning.',
+  },
+  'Grade 11': {
+    category: 'science',
+    focusHint: 'in-depth global issues, research, policy, technology — IB DP / Std XI level',
+    audienceHint: 'The student is age 16-17. Pre-university complexity, genuine critical analysis. Never simplify to primary-school level.',
+  },
+  'Grade 12': {
+    category: 'science',
+    focusHint: 'in-depth global issues, research, policy, technology — IB DP / Std XII level',
+    audienceHint: 'The student is age 17-18. University-preparatory, sophisticated reasoning. Never simplify to primary-school level.',
   },
 };
 

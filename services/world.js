@@ -11,6 +11,11 @@ function todayKey() {
 }
 
 // ── Grade → age mapping for age-appropriate content ─────────────────
+// Previously stopped at Grade 9 — any higher grade (10/11/12, i.e. every IB
+// DP / CBSE Std XI-XII / Cambridge A-Level student) silently fell back to
+// GRADE_INFO['Grade 3'] (age 8-9, "fun facts... exciting tone"). That's the
+// confirmed root cause of Grade 11 students getting Grade-3-level "if you
+// have 3 apples" content — not a model/prompt issue, a missing lookup entry.
 const GRADE_INFO = {
   'Grade 1': { age: '6-7',  tone: 'very simple, short sentences, familiar topics like animals and colors' },
   'Grade 2': { age: '7-8',  tone: 'simple language, relatable everyday examples' },
@@ -21,10 +26,25 @@ const GRADE_INFO = {
   'Grade 7': { age: '12-13', tone: 'critical thinking, connecting concepts across subjects' },
   'Grade 8': { age: '13-14', tone: 'mature reasoning, real-world applications, nuanced understanding' },
   'Grade 9': { age: '14-15', tone: 'advanced concepts, current global issues, research-style' },
+  'Grade 10': { age: '15-16', tone: 'exam-level rigor, structured analytical reasoning, board/IGCSE-appropriate depth' },
+  'Grade 11': { age: '16-17', tone: 'pre-university complexity, genuine critical analysis, IB DP / Std XI depth — never simplify to primary-school level' },
+  'Grade 12': { age: '17-18', tone: 'university-preparatory, sophisticated cross-disciplinary reasoning, IB DP / Std XII depth — never simplify to primary-school level' },
 };
 
 function gradeInfo(grade) {
   return GRADE_INFO[grade] || GRADE_INFO['Grade 3'];
+}
+
+// ── Fun Challenge difficulty guidance per grade band ─────────────────
+// Reinforces GRADE_INFO's age/tone with a concrete difficulty bar, since
+// "appropriate for age X" alone wasn't enough to stop the model from
+// defaulting to trivial arithmetic once the age itself was correct.
+function challengeDifficultyHint(grade) {
+  const n = parseInt(String(grade).replace(/\D/g, ''), 10) || 3;
+  if (n <= 2)  return 'Keep it to single-digit counting or simple shape/pattern recognition.';
+  if (n <= 5)  return 'A short logic or basic-math puzzle a curious primary-schooler can solve with a bit of thought — not trivial single-step arithmetic.';
+  if (n <= 8)  return 'A genuine multi-step logic, ratio, or pattern puzzle requiring real reasoning, not a one-line sum.';
+  return 'A genuinely challenging puzzle requiring multi-step reasoning, real-world application, or subject-level thinking appropriate for a pre-university student — nothing that would look out of place in a competition/olympiad warm-up.';
 }
 
 // ── Grade-specific NewsAPI config ───────────────────────────────────
@@ -38,6 +58,9 @@ const GRADE_NEWS = {
   'Grade 7': { category: 'science', focus: 'science, global events, engineering' },
   'Grade 8': { category: 'technology', focus: 'technology, world affairs, innovation' },
   'Grade 9': { category: 'science', focus: 'research, global issues, scientific method' },
+  'Grade 10': { category: 'science', focus: 'exam-relevant science, world affairs, technology trends' },
+  'Grade 11': { category: 'science', focus: 'in-depth global issues, research, policy, and technology — IB DP / Std XI level' },
+  'Grade 12': { category: 'science', focus: 'in-depth global issues, research, policy, and technology — IB DP / Std XII level' },
 };
 
 function gradeNews(grade) {
@@ -144,12 +167,12 @@ async function generateGroqContent(grade) {
 Today is ${month} ${day}, ${year}. Content style: ${info.tone}.
 
 Generate:
-1. **On This Day** — 3 REAL historically accurate events on ${month} ${day}. Mix science, culture, sports. Each 1-2 sentences appropriate for age ${info.age}.
+1. **On This Day** — 3 REAL historically accurate events that happened specifically on ${month} ${day} (any past year). Mix science, culture, sports. Each 1-2 sentences appropriate for age ${info.age}. CRITICAL: these must be events that genuinely occurred on ${month} ${day} — think it through properly rather than reaching for the first date that comes to mind, and never reuse a stock example like the Moon landing or a Chicago fire unless it is itself a real ${month} ${day} event.
 2. **GK Fact** — One amazing ${category} fact for a ${grade} student. Vivid, relatable.
-3. **Fun Challenge** — One thinking question with answer, appropriate for age ${info.age}.
+3. **Fun Challenge** — One thinking question with answer, matched to ${grade} (age ${info.age}) difficulty — NOT a younger-grade-level question. ${challengeDifficultyHint(grade)} Do not mention any age or grade inside the question text itself — the difficulty should speak for itself.
 
-Respond ONLY with valid JSON — no markdown, no backticks:
-{"onThisDay":[{"year":1969,"fact":"..."},{"year":2004,"fact":"..."},{"year":1858,"fact":"..."}],"gkFact":{"title":"...","fact":"...","category":"${category}"},"funChallenge":{"question":"...","answer":"..."}}`;
+Respond ONLY with valid JSON — no markdown, no backticks. The years and text below are ONLY placeholders showing the shape; replace every value with your own real, date-matched content — do not copy them:
+{"onThisDay":[{"year":<real year>,"fact":"<real ${month} ${day} event>"},{"year":<real year>,"fact":"<real ${month} ${day} event>"},{"year":<real year>,"fact":"<real ${month} ${day} event>"}],"gkFact":{"title":"...","fact":"...","category":"${category}"},"funChallenge":{"question":"...","answer":"..."}}`;
 
   const resp = await groq.chat.completions.create({
     model: 'openai/gpt-oss-20b',
