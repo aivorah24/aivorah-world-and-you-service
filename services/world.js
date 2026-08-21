@@ -85,6 +85,11 @@ Respond ONLY with valid JSON array — no markdown:
       }],
       temperature: 0.3,
       max_tokens: 300,
+      // See generateGroqContent() below for why: gpt-oss-20b can spiral into
+      // a long internal reasoning loop on open-ended factual tasks. Applied
+      // here too since it's the same model/risk, even though this call
+      // already degrades gracefully via the catch below if it ever happens.
+      reasoning_effort: 'low',
     });
 
     const raw = simplified.choices[0].message.content.trim();
@@ -113,6 +118,7 @@ Respond ONLY with valid JSON — no markdown:
     }],
     temperature: 0.7,
     max_tokens: 250,
+    reasoning_effort: 'low',
   });
   try {
     const raw = resp.choices[0].message.content.trim();
@@ -149,13 +155,17 @@ Respond ONLY with valid JSON — no markdown, no backticks:
     model: 'openai/gpt-oss-20b',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
-    // gpt-oss-20b is a reasoning model — it can spend part of the token
-    // budget on an internal "thinking" preamble before the actual answer.
-    // At 600 that preamble was eating the whole budget, truncating the
-    // response before the JSON ever appeared ("No JSON in response",
-    // confirmed live on /world/daily after the Aug-16 Groq model migration).
-    // Raised well above what the actual JSON needs (a few hundred tokens)
-    // to leave headroom for that preamble.
+    // gpt-oss-20b is a reasoning model with a SEPARATE `reasoning` field on
+    // the response (not mixed into `content`) — so raising max_tokens alone
+    // doesn't help when the model gets stuck. Confirmed directly against
+    // Groq: this exact prompt ("give 3 REAL historically accurate events on
+    // a specific date") sent it into a genuine reasoning loop — repeatedly
+    // rejecting its own fact recall ("no... let's think again...") until it
+    // hit finish_reason:"length" having spent 1998/2000 tokens thinking and
+    // produced empty content. reasoning_effort:'low' caps that budget so it
+    // commits to an answer instead of spiraling — confirmed via the same
+    // direct test: finish_reason:"stop", valid JSON, 844 reasoning tokens.
+    reasoning_effort: 'low',
     max_tokens: 2000,
   });
 
