@@ -105,6 +105,81 @@ describe('generateComprehensionQuiz', () => {
   });
 });
 
+describe('generateComprehensionQuiz — reasoning-model replies', () => {
+  const GOOD = JSON.stringify([
+    { question: 'Who added the flaw to its catalog?', options: ['Apple', 'CISA', 'FBI', 'NASA'], correct: 1 },
+    { question: 'What was bypassed?', options: ['A password', 'Pointer authentication', 'A firewall', 'A camera'], correct: 1 },
+  ]);
+  const ARTICLE = { headline: 'Hackers exploit patched Apple flaw', summary: 'CISA adds an Apple bug to its list.', grade: 'Grade 8' };
+
+  test('asks for short reasoning and leaves room for the answer (no tiny max_tokens)', async () => {
+    mockGroqCreate.mockResolvedValue(groqResponse(GOOD));
+    await generateComprehensionQuiz(ARTICLE);
+    const req = mockGroqCreate.mock.calls[0][0];
+    expect(req.model).toBe('openai/gpt-oss-20b');
+    expect(req.reasoning_effort).toBe('low');
+    expect(req.max_completion_tokens).toBeGreaterThanOrEqual(1000);
+    expect(req.max_tokens).toBeUndefined();
+  });
+
+  test('an empty reply (reasoning used up the budget) is retried once', async () => {
+    mockGroqCreate
+      .mockResolvedValueOnce(groqResponse(''))
+      .mockResolvedValueOnce(groqResponse(GOOD));
+    const result = await generateComprehensionQuiz(ARTICLE);
+    expect(mockGroqCreate).toHaveBeenCalledTimes(2);
+    expect(result.map((q) => q.correct)).toEqual([1, 1]);
+  });
+
+  test('a null content field is handled like an empty reply', async () => {
+    mockGroqCreate
+      .mockResolvedValueOnce({ choices: [{ message: { content: null } }] })
+      .mockResolvedValueOnce(groqResponse(GOOD));
+    expect(await generateComprehensionQuiz(ARTICLE)).toHaveLength(2);
+  });
+
+  test('JSON with words around it is still read', async () => {
+    mockGroqCreate.mockResolvedValue(groqResponse(`Here is your quiz:\n${GOOD}\nGood luck!`));
+    expect(await generateComprehensionQuiz(ARTICLE)).toHaveLength(2);
+  });
+
+  test('a {"questions": [...]} object is accepted too', async () => {
+    mockGroqCreate.mockResolvedValue(groqResponse(JSON.stringify({ questions: JSON.parse(GOOD) })));
+    expect(await generateComprehensionQuiz(ARTICLE)).toHaveLength(2);
+  });
+
+  test('a question without 4 options or a valid answer is dropped', async () => {
+    mockGroqCreate.mockResolvedValue(groqResponse(JSON.stringify([
+      { question: 'Only three?', options: ['a', 'b', 'c'], correct: 0 },
+      { question: 'Fine', options: ['a', 'b', 'c', 'd'], correct: 3 },
+    ])));
+    const result = await generateComprehensionQuiz(ARTICLE);
+    expect(result.map((q) => q.question)).toEqual(['Fine']);
+  });
+
+  test('two unusable replies in a row -> an error (the route answers 500)', async () => {
+    mockGroqCreate
+      .mockResolvedValueOnce(groqResponse('[{"question":"Cut off mid-'))
+      .mockResolvedValueOnce(groqResponse(''));
+    await expect(generateComprehensionQuiz(ARTICLE)).rejects.toThrow();
+    expect(mockGroqCreate).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('extractJSON', () => {
+  const { extractJSON } = require('../../services/dailyTidbit');
+  test('plain, fenced and wrapped JSON', () => {
+    expect(extractJSON('{"a":1}')).toEqual({ a: 1 });
+    expect(extractJSON('```json\n[1,2]\n```')).toEqual([1, 2]);
+    expect(extractJSON('Sure! {"headline":"Hi","summary":"There."} Hope it helps')).toEqual({ headline: 'Hi', summary: 'There.' });
+  });
+  test('no JSON or a cut-off reply throws', () => {
+    expect(() => extractJSON('')).toThrow();
+    expect(() => extractJSON('no json here')).toThrow();
+    expect(() => extractJSON('[{"question": "half')).toThrow();
+  });
+});
+
 describe('getDailyTidbit', () => {
   test('returns real GK fact and current-affairs content when no NEWS_API_KEY is set (fallback path)', async () => {
     mockGroqCreate

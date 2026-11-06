@@ -3,6 +3,38 @@ const axios = require('axios');
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
+// openai/gpt-oss-20b is a *reasoning* model: it thinks before it answers and
+// that thinking counts against the token limit. With the old limits (5, 160,
+// 400 tokens) it usually ran out before writing the answer, so `content` came
+// back empty or cut off: the comprehension quiz failed ~4 times in 5 ("Could
+// not load quiz"), and current affairs silently fell back to the raw, adult
+// news headline. Keep the thinking short and leave room for the answer.
+const MODEL = 'openai/gpt-oss-20b';
+const REASONING_BUDGET = 1024;
+
+async function complete(messages, { temperature, maxTokens }) {
+  const resp = await groq.chat.completions.create({
+    model: MODEL,
+    messages,
+    temperature,
+    reasoning_effort: 'low',
+    max_completion_tokens: maxTokens + REASONING_BUDGET,
+  });
+  return String(resp?.choices?.[0]?.message?.content || '').trim();
+}
+
+// The JSON value in a model reply: tolerates ```json fences and words around it.
+function extractJSON(raw) {
+  const text = String(raw || '').replace(/```(?:json)?/gi, '').trim();
+  try { return JSON.parse(text); } catch { /* look for the JSON inside */ }
+  const starts = ['[', '{'].map((c) => text.indexOf(c)).filter((i) => i >= 0);
+  if (!starts.length) throw new Error('No JSON in the AI reply');
+  const start = Math.min(...starts);
+  const end = text.lastIndexOf(text[start] === '[' ? ']' : '}');
+  if (end <= start) throw new Error('Incomplete JSON in the AI reply');
+  return JSON.parse(text.slice(start, end + 1));
+}
+
 function computeLevel(xp) {
   let level = 1, threshold = 500, total = 0;
   while (xp >= total + threshold) { total += threshold; threshold += 250; level++; }
@@ -51,9 +83,7 @@ async function generateGKFact(grade) {
   const category = GK_CATEGORIES[new Date().getDate() % GK_CATEGORIES.length];
   const rules    = ageRule(grade);
 
-  const resp = await groq.chat.completions.create({
-    model: 'openai/gpt-oss-20b',
-    messages: [
+  const raw = await complete([
       {
         role: 'system',
         content: `You are a fun knowledge tutor for kids. ${rules}
@@ -63,15 +93,10 @@ Respond ONLY with valid JSON — no markdown, no extra text:
 {"fact": "...", "category": "${category}"}`,
       },
       { role: 'user', content: `GK fact for ${grade} — category: ${category}` },
-    ],
-    temperature: 0.85,
-    max_tokens: 160,
-  });
+    ], { temperature: 0.85, maxTokens: 200 });
 
-  const raw = resp.choices[0].message.content.trim();
   try {
-    const clean = raw.replace(/```json\n?/g, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(clean);
+    const parsed = extractJSON(raw);
     // Unwrap nested JSON if AI returned fact as a stringified object
     let fact = parsed.fact || '';
     while (typeof fact === 'string' && fact.trim().startsWith('{')) {
@@ -192,25 +217,18 @@ async function fetchCurrentAffairs(grade) {
     const rules = ageRule(grade);
     const articleList = articles.slice(0, 5).map((a, i) => `${i + 1}. ${a.title}`).join('\n');
 
-    const pickResp = await groq.chat.completions.create({
-      model: 'openai/gpt-oss-20b',
-      messages: [
+    const picked = await complete([
         {
           role: 'system',
           content: `${audienceHint} Pick the single most interesting and age-appropriate article number from this list. Reply ONLY with the number (e.g. "2").`,
         },
         { role: 'user', content: articleList },
-      ],
-      temperature: 0.2,
-      max_tokens: 5,
-    });
+      ], { temperature: 0.2, maxTokens: 10 });
 
-    const pickedIdx = parseInt(pickResp.choices[0].message.content.trim()) - 1;
+    const pickedIdx = parseInt((picked.match(/\d+/) || [])[0], 10) - 1;
     const article   = articles[Math.max(0, Math.min(pickedIdx || 0, articles.length - 1))];
 
-    const simplified = await groq.chat.completions.create({
-      model: 'openai/gpt-oss-20b',
-      messages: [
+    const raw = await complete([
         {
           role: 'system',
           content: `You simplify news for kids. ${rules} ${audienceHint}
@@ -222,15 +240,12 @@ Respond ONLY with valid JSON — no markdown:
           role: 'user',
           content: `Title: ${article.title}\nDescription: ${article.description}`,
         },
-      ],
-      temperature: 0.3,
-      max_tokens: 160,
-    });
+      ], { temperature: 0.3, maxTokens: 200 });
 
-    const raw = simplified.choices[0].message.content.trim();
     try {
-      const clean = raw.replace(/```json\n?/g, '').replace(/```/g, '').trim();
-      return { ...JSON.parse(clean), newsCategory: category };
+      const parsed = extractJSON(raw);
+      if (!parsed?.headline || !parsed?.summary) throw new Error('incomplete');
+      return { headline: parsed.headline, summary: parsed.summary, newsCategory: category };
     } catch {
       return { headline: article.title, summary: article.description, newsCategory: category };
     }
@@ -243,26 +258,21 @@ Respond ONLY with valid JSON — no markdown:
 async function generateCurrentAffairsFallback(grade) {
   const rules = ageRule(grade);
 
-  const resp = await groq.chat.completions.create({
-    model: 'openai/gpt-oss-20b',
-    messages: [
-      {
-        role: 'system',
-        content: `You are a news tutor for kids. ${rules}
+  const raw = await complete([
+    {
+      role: 'system',
+      content: `You are a news tutor for kids. ${rules}
 Share one positive, interesting world news event or scientific discovery from 2023-2024.
 Respond ONLY with valid JSON — no markdown:
 {"headline": "short title (max 8 words)", "summary": "2 simple sentences"}`,
-      },
-      { role: 'user', content: `Current affairs tidbit for ${grade} students.` },
-    ],
-    temperature: 0.75,
-    max_tokens: 160,
-  });
+    },
+    { role: 'user', content: `Current affairs tidbit for ${grade} students.` },
+  ], { temperature: 0.75, maxTokens: 200 });
 
-  const raw = resp.choices[0].message.content.trim();
   try {
-    const clean = raw.replace(/```json\n?/g, '').replace(/```/g, '').trim();
-    return JSON.parse(clean);
+    const parsed = extractJSON(raw);
+    if (!parsed?.headline || !parsed?.summary) throw new Error('incomplete');
+    return { headline: parsed.headline, summary: parsed.summary };
   } catch {
     return { headline: 'World Update', summary: raw };
   }
@@ -346,33 +356,46 @@ function normalizeQuizQuestions(questions) {
   });
 }
 
+// A usable question: text, 4 options, a correct index among them.
+const isUsableQuestion = (q) => !!q && typeof q.question === 'string' && q.question.trim()
+  && Array.isArray(q.options) && q.options.length === 4
+  && Number.isInteger(q.correct) && q.correct >= 0 && q.correct < 4;
+
 async function generateComprehensionQuiz({ headline, summary, grade = 'Grade 3' }) {
   const rules = ageRule(grade);
-  const resp = await groq.chat.completions.create({
-    model: 'openai/gpt-oss-20b',
-    messages: [
-      {
-        role: 'system',
-        content: `You are a quiz maker for kids. ${rules}
+  const messages = [
+    {
+      role: 'system',
+      content: `You are a quiz maker for kids. ${rules}
 Based on the news article, create exactly 2 multiple-choice questions to test reading comprehension.
 Each question must have 4 short options with exactly one correct answer.
 Respond ONLY with a valid JSON array — no markdown, no explanation:
 [{"question":"...","options":["First choice","Second choice","Third choice","Fourth choice"],"correct":0},{"question":"...","options":["First choice","Second choice","Third choice","Fourth choice"],"correct":2}]
 (correct is the 0-based index of the right option)`,
-      },
-      { role: 'user', content: `Article headline: ${headline}\nSummary: ${summary}` },
-    ],
-    temperature: 0.4,
-    max_tokens: 400,
-  });
+    },
+    { role: 'user', content: `Article headline: ${headline}\nSummary: ${summary}` },
+  ];
 
-  const raw   = resp.choices[0].message.content.trim();
-  const clean = raw.replace(/```json\n?/g, '').replace(/```/g, '').trim();
-  return normalizeQuizQuestions(JSON.parse(clean));
+  // One retry: a model reply is occasionally unusable even with room to answer.
+  let lastError;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const raw = await complete(messages, { temperature: 0.4, maxTokens: 500 });
+      const parsed = extractJSON(raw);
+      const list = Array.isArray(parsed) ? parsed : parsed?.questions;
+      const questions = normalizeQuizQuestions(list).filter(isUsableQuestion);
+      if (questions.length) return questions;
+      lastError = new Error('The AI reply had no usable questions');
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
 }
 
 module.exports = {
   computeLevel,
+  extractJSON,
   getDailyTidbit,
   generateComprehensionQuiz,
   normalizeQuizQuestions,
