@@ -430,6 +430,7 @@ Respond ONLY with a valid JSON array — no markdown, no explanation:
 }
 
 module.exports = {
+  complete,
   computeLevel,
   extractJSON,
   getDailyTidbit,
