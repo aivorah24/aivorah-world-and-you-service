@@ -125,6 +125,58 @@ describe('story checks (warnings, image, source link)', () => {
   });
 });
 
+describe('bulk review', () => {
+  test("publish selected as today's digest: stamped, dated today, then shown to students", async () => {
+    const a = storyRow({ n: 1, status: 'review', publish_date: '2026-11-08', review_notes: 'AUTO: VERIFIED' });
+    const b = storyRow({ n: 2, status: 'draft', publish_date: '2026-11-08' });
+    const live = storyRow({ n: 3, status: 'published', publish_date: '2026-11-08' });
+    const gone = storyRow({ n: 4, status: 'rejected' });
+    supabase.__seed('ca_stories', [a, b, live, gone]);
+    const res = await send('post', '/stories/bulk-status', { ids: [a.id, b.id, live.id, gone.id, 'nope'], status: 'published', publishDate: 'today' });
+    expect(res.status).toBe(200);
+    expect(res.body.updated).toBe(2);
+    expect(res.body.results).toEqual([
+      { id: a.id, ok: true, status: 'published', publish_date: '2026-11-09' },
+      { id: b.id, ok: true, status: 'published', publish_date: '2026-11-09' },
+      { id: live.id, ok: false, reason: 'not waiting for review (it is published)' },
+      { id: gone.id, ok: false, reason: 'not waiting for review (it is rejected)' },
+      { id: 'nope', ok: false, reason: 'not a story id' },
+    ]);
+    const saved = supabase.__rows('ca_stories').find((r) => r.id === a.id);
+    expect(saved).toMatchObject({ reviewed_by: EDITOR, is_true_fact: true });
+    const digest = await request(app).get('/current-affairs/digest/today?ageGroup=7-12');
+    expect(digest.body.date).toBe('2026-11-09');
+    expect(digest.body.stories.map((s) => s.id).sort()).toEqual([a.id, b.id].sort());
+  });
+
+  test('reject selected; publishing without a date keeps each story’s own date', async () => {
+    const a = storyRow({ n: 1, status: 'review', publish_date: '2026-11-08' });
+    const b = storyRow({ n: 2, status: 'review', publish_date: '2026-11-07' });
+    supabase.__seed('ca_stories', [a, b]);
+    expect((await send('post', '/stories/bulk-status', { ids: [a.id], status: 'rejected' })).body.results[0]).toMatchObject({ ok: true, status: 'rejected' });
+    expect((await send('post', '/stories/bulk-status', { ids: [b.id], status: 'published' })).body.results[0]).toMatchObject({ ok: true, publish_date: '2026-11-07' });
+  });
+
+  test('checks its input and needs an editor', async () => {
+    const ids = Array.from({ length: 21 }, () => storyRow().id);
+    expect((await send('post', '/stories/bulk-status', { ids, status: 'published' })).status).toBe(400);
+    expect((await send('post', '/stories/bulk-status', { ids: [], status: 'published' })).status).toBe(400);
+    expect((await send('post', '/stories/bulk-status', { ids: [ids[0]], status: 'archived' })).status).toBe(400);
+    expect((await send('post', '/stories/bulk-status', { ids: [ids[0]], status: 'published', publishDate: '2026-01-01' })).status).toBe(400);
+    expect((await send('post', '/stories/bulk-status', { ids: [ids[0]], status: 'published' }, 'kid@school.in')).status).toBe(403);
+  });
+
+  test('last auto run: when the pipeline last saved stories, and how many were verified', async () => {
+    expect((await get('/pipeline/last-run')).body).toEqual({ lastRun: null });
+    supabase.__seed('ca_stories', [
+      storyRow({ n: 1, status: 'review', review_notes: 'AUTO: VERIFIED', created_at: '2026-11-09T00:31:00Z' }),
+      storyRow({ n: 2, status: 'review', review_notes: 'AUTO: CHECK - the figure', created_at: '2026-11-09T00:32:00Z' }),
+      storyRow({ n: 3, status: 'review', review_notes: null, created_at: '2026-11-09T05:00:00Z' }),
+    ]);
+    expect((await get('/pipeline/last-run')).body.lastRun).toEqual({ at: '2026-11-09T00:32:00Z', date: '2026-11-09', saved: 2, verified: 1 });
+  });
+});
+
 describe('quiz question ↔ story link', () => {
   const q = (over) => ({
     week_start: '2026-11-08', age_group: '7-12', category: 'india', question_type: 'true_false',

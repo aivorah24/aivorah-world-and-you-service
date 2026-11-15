@@ -81,7 +81,7 @@ router.get('/stories', handle(async (req, res) => {
   if ((from && !isDateString(from)) || (to && !isDateString(to))) return bad(res, 'from/to must be YYYY-MM-DD');
   const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
   let q = supabase.from('ca_stories')
-    .select('id, category, publish_date, status, priority, title_kid, summary_kid, source, source_url, review_notes, is_true_fact, reviewed_by, reviewed_at, created_at');
+    .select('id, category, publish_date, status, priority, title_kid, summary_kid, what_happened_kid, title_teen, summary_teen, what_happened_teen, source, source_url, review_notes, is_true_fact, reviewed_by, reviewed_at, created_at');
   if (status) q = q.eq('status', status);
   if (from) q = q.gte('publish_date', from);
   if (to) q = q.lte('publish_date', to);
@@ -117,6 +117,39 @@ router.patch('/stories/:id', handle(async (req, res) => {
   const rows = check(await supabase.from('ca_stories').update(patch).eq('id', req.params.id).select('*'));
   if (!rows?.length) return res.status(404).json({ error: 'Story not found' });
   res.json({ story: rows[0], warnings: lengthWarnings(rows[0]) });
+}));
+
+// POST /admin/stories/bulk-status { ids: [≤20], status: 'published'|'rejected'|'draft', publishDate?: 'today' }
+// Only stories waiting for review (or drafts) change. Publishing stamps them
+// like the single route; publishDate 'today' moves them into today's digest.
+const BULK_STATUSES = ['published', 'rejected', 'draft'];
+router.post('/stories/bulk-status', handle(async (req, res) => {
+  const { ids, status, publishDate } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length || ids.length > 20) return bad(res, 'ids must list 1 to 20 stories');
+  if (!BULK_STATUSES.includes(status)) return bad(res, `status must be one of ${BULK_STATUSES.join(', ')}`);
+  if (publishDate !== undefined && publishDate !== 'today') return bad(res, "publishDate can only be 'today'");
+  const stamp = reviewStamp(req, status);
+  if (status === 'published' && publishDate === 'today') stamp.publish_date = localDate();
+  const results = [];
+  for (const id of [...new Set(ids.map(String))]) {
+    if (!isUuid(id)) { results.push({ id, ok: false, reason: 'not a story id' }); continue; }
+    const rows = check(await supabase.from('ca_stories').update(stamp).eq('id', id).in('status', ['review', 'draft']).select('id, status, publish_date'));
+    if (rows?.length) { results.push({ id, ok: true, status: rows[0].status, publish_date: rows[0].publish_date }); continue; }
+    const existing = check(await supabase.from('ca_stories').select('status').eq('id', id).maybeSingle());
+    results.push({ id, ok: false, reason: existing ? `not waiting for review (it is ${existing.status})` : 'story not found' });
+  }
+  res.json({ updated: results.filter((r) => r.ok).length, results });
+}));
+
+// GET /admin/pipeline/last-run: when the daily pipeline last saved stories and how many.
+router.get('/pipeline/last-run', handle(async (req, res) => {
+  const rows = check(await supabase.from('ca_stories').select('created_at, publish_date, review_notes')
+    .order('created_at', { ascending: false }).limit(300)) || [];
+  const auto = rows.filter((r) => String(r.review_notes || '').startsWith('AUTO:'));
+  if (!auto.length) return res.json({ lastRun: null });
+  const day = auto[0].publish_date;
+  const sameDay = auto.filter((r) => r.publish_date === day);
+  res.json({ lastRun: { at: auto[0].created_at, date: day, saved: sameDay.length, verified: sameDay.filter((r) => r.review_notes === 'AUTO: VERIFIED').length } });
 }));
 
 // POST /admin/stories/:id/status { status: 'published' | 'rejected' | 'review' | 'archived' | 'draft' }
