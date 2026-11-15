@@ -114,10 +114,17 @@ describe('collect', () => {
   });
 
   test('PIB feeds are read from its RSS page; if none are found PIB is skipped and reported', async () => {
-    const pages = { [PIB_INDEX.url]: { body: '<a href="RssMain.aspx?ModId=6&Lang=1&Regid=3">English</a><a href="RssMain.aspx?ModId=6&Lang=2&Regid=3">Hindi</a>' } };
+    const PIB_FEED = 'https://www.pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3';
+    const pages = {
+      [PIB_INDEX.url]: { body: '<a href="RssMain.aspx?ModId=6&amp;Lang=1&amp;Regid=3">Releases</a>' },
+      [PIB_FEED]: { body: rss([{ title: 'Cabinet approves new rail line', link: 'https://pib.gov.in/PressRelease.aspx?PRID=1', date: hoursAgo(3) }]) },
+    };
     const withPib = await collect({ supabase, fetchImpl: fetchFrom(pages), now: NOW });
-    expect(withPib.report.feedsFailed.find((f) => f.source === 'PIB' && f.url.includes('Lang=1'))).toBeTruthy();
-    expect(withPib.report.feedsFailed.some((f) => f.url.includes('Lang=2'))).toBe(false);
+    expect(withPib.items.find((i) => i.source === 'PIB')).toMatchObject({ title: 'Cabinet approves new rail line', feedCategory: 'india' });
+    // A feed with no dates is skipped and reported (PIB sends none today).
+    pages[PIB_FEED] = { body: '<rss><channel><item><title>No date here</title><link>https://pib.gov.in/x</link></item></channel></rss>' };
+    const undated = await collect({ supabase, fetchImpl: fetchFrom(pages), now: NOW });
+    expect(undated.report.feedsFailed.find((f) => f.url === PIB_FEED).reason).toBe('no publish dates in the feed');
     const noPib = await collect({ supabase, fetchImpl: fetchFrom({}), now: NOW });
     expect(noPib.report.feedsFailed.find((f) => f.source === 'PIB').reason).toMatch(/^PIB skipped/);
     expect(noPib.report.feedsFailed).toHaveLength(FEEDS.length + 1);
@@ -156,6 +163,14 @@ describe('select', () => {
       { index: 0, category: 'india', score: 3, key_facts: ['a'] }, // twice
     ]);
     expect(picks.map((p) => p.title)).toEqual(['Item 0']);
+  });
+
+  test('if the AI cannot be reached, nothing is selected and the report says why', async () => {
+    const { select } = require('../../current-affairs/pipeline/select');
+    const llm = createLlm({ ask: async () => { throw new Error('GROQ_API_KEY missing'); } });
+    const { picks, report } = await select([item(0)], llm);
+    expect(picks).toEqual([]);
+    expect(report.error).toBe('AI selection failed: GROQ_API_KEY missing');
   });
 
   test('crime, betting, tenders, auctions and bank penalties never reach the AI', () => {

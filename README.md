@@ -56,8 +56,9 @@ tests/current-affairs/      — supertest + an in-memory Supabase fake
 
 - Tables `ca_*` and the `ca_apply_progress()` function: aivorah-db migrations
   (`0023_current_affairs.sql` and later).
-- Stories and quiz questions are written by the pipeline in
-  aivorah-current-affairs-service (GitHub Actions) and the admin content tool.
+- Stories and quiz questions are drafted by the pipeline below and finished
+  in the admin content tool. **Only an editor publishes**: the pipeline saves
+  everything with status `review` (stories also `is_true_fact = false`).
 - Environment: see the Current Affairs block in `.env.example`
   (`FIREBASE_SERVICE_ACCOUNT_B64`, `AUTH_ENFORCE` — never `monitor` in production).
 
@@ -66,7 +67,78 @@ Endpoints: `GET /current-affairs/digest/today`, `GET /current-affairs/digest/lis
 `POST /current-affairs/quiz/check`, `POST /current-affairs/quiz/submit`,
 `GET /current-affairs/progress/:studentEmail`,
 `POST /current-affairs/progress/{digest-complete,story-read,quiz-complete}`,
-`/current-affairs/admin/*` (editors only).
+`/current-affairs/admin/*` (editors only), `/current-affairs/pipeline/*` (scheduler only, below).
+
+### Daily news pipeline (`current-affairs/pipeline/`)
+
+1. **Collect** (`feeds.js`, `collect.js`): the approved feeds only (The Hindu,
+   RBI, UN News, Sportstar; PIB from its RSS page). 15 s timeout, one retry; a
+   failing feed is skipped and reported. Keeps the last 24 hours, strips HTML,
+   drops duplicate links and near-identical titles, and anything already in
+   `ca_stories` in any status (same `source_url_hash` as the admin tool).
+2. **Select** (`select.js`): a child-safety filter, then one AI call picks 5-7
+   stories (India 2-3, World 2, Science 1, one of sports/environment/society;
+   economy may take one place). Never padded.
+3. **Verify** (`verify.js`): reads each source page and asks the AI whether the
+   key facts are supported. CONTRADICTED is dropped; an unreadable page is UNCLEAR.
+4. **Write** (`write.js`): both versions (7-12: 50-80 words, 13-15: 100-150),
+   a fact, three words (the first for age 7) and a question; length-checked,
+   one retry.
+5. **Save** (`run.js`): one `ca_stories` row each, `status 'review'`,
+   `is_true_fact false`, `review_notes` = `AUTO: VERIFIED` or
+   `AUTO: CHECK - <what to check>`.
+
+AI calls per run are capped (selection 1, checks 8, writing 8, quiz 4).
+
+**Weekly quiz** (`quizGen.js`): the quiz of week_start S (a Sunday) uses only
+**published** stories dated S-6 to S. For 7-12 and 13-15: 10 questions each
+(2 per category slot; 6 multiple choice, 2 true/false, 2 reasoning), each
+with the story it comes from. Saved as `review`; publish the week in the admin
+tool. A week that already has questions is skipped unless `force` is sent.
+
+**Run it**
+
+```bash
+node scripts/runDailyPipeline.js --dry-run          # report + rows it would save; writes nothing
+node scripts/generateWeeklyQuiz.js --dry-run [--week=2026-11-22] [--force]
+```
+
+Writes happen only when `CA_PIPELINE_ENABLED=true`. The scheduler calls:
+
+```bash
+curl -X POST https://aivorah-world-and-you-service.onrender.com/current-affairs/pipeline/run \
+  -H "x-pipeline-secret: $CA_PIPELINE_SECRET"
+curl -X POST https://aivorah-world-and-you-service.onrender.com/current-affairs/pipeline/quiz \
+  -H "x-pipeline-secret: $CA_PIPELINE_SECRET" -H "Content-Type: application/json" -d '{}'
+```
+
+Both answer `202 { runId, started: true }` at once and run in the background;
+the report is printed to the service log (`[ca-pipeline]` / `[ca-quiz]`). A
+missing or wrong header (or no `CA_PIPELINE_SECRET` on the service) is `401`.
+
+**Schedule** (cron times are UTC):
+
+| Job | When (India) | Cron (UTC) |
+|---|---|---|
+| Daily news | 6:00 AM every day | `30 0 * * *` |
+| Weekly quiz | Saturday 8:00 PM (for Sunday's quiz) | `30 14 * * 6` |
+
+A Render Cron Job running the `curl` above works, but Render bills cron jobs
+by the minute (no free tier). A free option is a scheduled GitHub Actions
+workflow that runs the same `curl` with the secret stored as a repository
+secret. Nothing was created for this; set it up by hand.
+
+**Editor's daily routine**
+
+1. After 6 AM open Admin → Current Affairs → Stories → **To review**. The top
+   line shows the last automatic run.
+2. Open each story's source link. **VERIFIED** (green) means the key facts
+   matched the source page; **CHECK** (amber) says what to look at.
+3. Open a story to fix either age version (word counters warn outside the targets).
+4. Tick the good stories (or **Select all verified** after checking them),
+   **Publish selected as today's digest**, confirm. **Reject selected** for the rest.
+5. On Sunday open **Weekly quiz**, read both age groups' questions (each shows
+   its story), fix or reject any, then publish the week.
 
 ## Known gaps (carried over from the monolith, not introduced here)
 

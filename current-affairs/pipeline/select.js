@@ -47,7 +47,13 @@ async function select(items, llm) {
   const report = { unsuitable: items.length - suitable.length, sentToAi: Math.min(suitable.length, MAX_ITEMS_TO_AI), selected: 0 };
   if (!suitable.length) return { picks: [], report };
   const batch = suitable.slice(0, MAX_ITEMS_TO_AI);
-  const answer = await llm.json('select', `${PROMPT_A}\n\nITEMS:\n${itemList(batch)}`, { maxTokens: 2500 });
+  let answer;
+  try {
+    answer = await llm.json('select', `${PROMPT_A}\n\nITEMS:\n${itemList(batch)}`, { maxTokens: 2500 });
+  } catch (err) {
+    report.error = `AI selection failed: ${err.message}`;
+    return { picks: [], report };
+  }
   const picks = applyPicks(batch, answer?.selected);
   report.selected = picks.length;
   return { picks, report };

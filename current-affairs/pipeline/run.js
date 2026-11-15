@@ -87,7 +87,7 @@ async function runDailyPipeline({ supabase, fetchImpl, llm = createLlm(), now = 
 function summarize(report) {
   const failed = (report.feeds.failed || []).map((f) => `${f.source} (${f.reason})`).join('; ') || 'none';
   return `[ca-pipeline] ${report.runId} ${report.date} ${report.mode}: feeds read ${report.feeds.read}, failed ${failed}; `
-    + `items ${report.collected.collected} -> kept ${report.collected.kept}; selected ${report.selected.selected}; `
+    + `items ${report.collected.collected} -> kept ${report.collected.kept}; selected ${report.selected.selected}${report.selected.error ? ` (${report.selected.error})` : ''}; `
     + `verified ${report.verification.verified}, unclear ${report.verification.unclear}, dropped ${report.verification.dropped.length}; `
     + `written ${report.written}; saved ${report.saved}; skipped ${report.skipped.length}`;
 }

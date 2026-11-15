@@ -20,6 +20,8 @@ function similar(a, b) {
 async function readFeed(feed, fetchImpl, report) {
   try {
     const items = parseFeed(await fetchText(feed.url, { fetchImpl }));
+    // Without dates we cannot tell what is from the last 24 hours (PIB's feeds today).
+    if (items.length && items.every((i) => !i.publishedAt)) throw new Error('no publish dates in the feed');
     report.feedsRead.push({ source: feed.source, url: feed.url, items: items.length });
     return items.map((i) => ({ ...i, source: feed.source, feedCategory: feed.category }));
   } catch (err) {

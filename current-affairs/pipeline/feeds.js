@@ -14,7 +14,7 @@ const FEEDS = [
   { source: 'The Hindu', category: 'society', url: 'https://www.thehindu.com/education/feeder/default.rss' },
 ];
 // PIB lists its RSS feeds on this page; the feed links are read from it each run.
-const PIB_INDEX = { source: 'PIB', category: 'india', url: 'https://www.pib.gov.in/ViewRss.aspx' };
+const PIB_INDEX = { source: 'PIB', category: 'india', url: 'https://www.pib.gov.in/ViewRss.aspx?reg=3&lang=1' };
 const PIB_MAX_FEEDS = 4;
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
@@ -85,7 +85,7 @@ function extractPibFeeds(html) {
   for (const m of String(html || '').matchAll(/href=["']([^"']*RssMain\.aspx[^"']*)["']/gi)) {
     try { links.add(new URL(decodeEntities(m[1]), PIB_INDEX.url).toString()); } catch { /* skip */ }
   }
-  return [...links].filter((l) => !/Lang=(?!1\b)\d+/i.test(l)).slice(0, PIB_MAX_FEEDS);
+  return [...links].slice(0, PIB_MAX_FEEDS);
 }
 
 module.exports = { FEEDS, PIB_INDEX, USER_AGENT, fetchText, parseFeed, stripHtml, decodeEntities, extractPibFeeds };
