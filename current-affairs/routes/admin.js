@@ -231,8 +231,12 @@ router.get('/quiz', handle(async (req, res) => {
   const ageGroup = readAge(res, req.query.ageGroup);
   if (!ageGroup) return;
   const rows = check(await supabase.from('ca_quiz_questions').select('*')
-    .eq('week_start', weekStart).eq('age_group', ageGroup).order('position', { ascending: true }));
-  res.json({ weekStart, ageGroup, questions: rows || [] });
+    .eq('week_start', weekStart).eq('age_group', ageGroup).order('position', { ascending: true })) || [];
+  // The title of the story each question comes from, for the editor.
+  const storyIds = [...new Set(rows.map((r) => r.story_id).filter(Boolean))];
+  const stories = storyIds.length ? check(await supabase.from('ca_stories').select('id, title_kid').in('id', storyIds)) || [] : [];
+  const titles = new Map(stories.map((s) => [s.id, s.title_kid]));
+  res.json({ weekStart, ageGroup, questions: rows.map((r) => ({ ...r, story_title: titles.get(r.story_id) || null })) });
 }));
 
 // A question may name the story it comes from (optional for questions an

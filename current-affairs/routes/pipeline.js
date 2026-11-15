@@ -6,6 +6,8 @@ const crypto = require('crypto');
 const express = require('express');
 const supabase = require('../../services/supabase');
 const daily = require('../pipeline/run');
+const weekly = require('../pipeline/quizGen');
+const { isDateString, quizWeekStart } = require('../services/content');
 
 const router = express.Router();
 
@@ -42,6 +44,19 @@ router.post('/run', requireSecret, (req, res) => {
   startInBackground(res, 'daily', async () => {
     const report = await daily.runDailyPipeline({ supabase });
     return { summary: daily.summarize(report) };
+  });
+});
+
+// POST /current-affairs/pipeline/quiz { weekStart?: Sunday, force?: true }:
+// the week's quiz for both age groups, saved for review only.
+router.post('/quiz', requireSecret, (req, res) => {
+  const { weekStart, force } = req.body || {};
+  if (weekStart !== undefined && (!isDateString(weekStart) || quizWeekStart(weekStart) !== weekStart)) {
+    return res.status(400).json({ error: 'weekStart must be a Sunday, YYYY-MM-DD' });
+  }
+  startInBackground(res, 'quiz', async () => {
+    const report = await weekly.generateWeeklyQuiz({ supabase, weekStart, force: force === true });
+    return { summary: weekly.summarizeQuiz(report) };
   });
 });
 
