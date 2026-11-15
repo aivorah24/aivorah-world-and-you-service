@@ -5,7 +5,7 @@
 // ca_stories row has one text column set per version (_kid, _teen); the old
 // _young columns (the retired under-8 version) are no longer shown.
 const AGE_GROUPS = {
-  '7-12':  { column: 'kid',  storiesPerDay: 6, newWords: 2, wordsPerMinute: 130 },
+  '7-12':  { column: 'kid',  storiesPerDay: 6, newWords: 1, wordsPerMinute: 130 },
   '13-15': { column: 'teen', storiesPerDay: 7, newWords: 3, wordsPerMinute: 170 },
 };
 const AGE_GROUP_NAMES = Object.keys(AGE_GROUPS);
@@ -70,17 +70,16 @@ function readTimeSeconds(words, ageGroup) {
   return Math.min(180, Math.max(30, secs));
 }
 
+// New words: 7-12 sees only new_word_1 (the simplest word, chosen for both
+// ages); 13-15 sees new_word_1..3, the ones that are filled in (2-3 words).
 function wordsFor(row, ageGroup) {
-  const extras = row.age_extras?.[AGE_GROUPS[ageGroup].column];
-  const list = Array.isArray(extras?.newWords) && extras.newWords.length
-    ? extras.newWords
-    : [
-      { word: row.new_word_1, definition: row.def_1 },
-      { word: row.new_word_2, definition: row.def_2 },
-      { word: row.new_word_3, definition: row.def_3 },
-    ];
+  const list = [
+    { word: row.new_word_1, definition: row.def_1 },
+    { word: row.new_word_2, definition: row.def_2 },
+    { word: row.new_word_3, definition: row.def_3 },
+  ];
   return list
-    .filter((w) => w && w.word && w.definition)
+    .filter((w) => w && String(w.word || '').trim() && String(w.definition || '').trim())
     .slice(0, AGE_GROUPS[ageGroup].newWords)
     .map((w) => ({ word: String(w.word), definition: String(w.definition) }));
 }
@@ -115,7 +114,28 @@ function toStory(row, ageGroup) {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (value) => UUID.test(String(value || ''));
 
+// Story length targets (words in what_happened): 7-12 aims for 50-80, 13-15
+// for 100-150. Outside the wider limits below an editor sees a warning
+// (never a block).
+const LENGTH_LIMITS = {
+  what_happened_kid:  { label: 'Ages 7-12 "What happened"',  target: '50-80',   min: 40, max: 95 },
+  what_happened_teen: { label: 'Ages 13-15 "What happened"', target: '100-150', min: 90, max: 165 },
+};
+
+function lengthWarnings(row) {
+  const warnings = [];
+  for (const [field, l] of Object.entries(LENGTH_LIMITS)) {
+    if (row[field] === undefined || row[field] === null) continue;
+    const words = wordCount(row[field]);
+    if (words < l.min || words > l.max) {
+      warnings.push({ field, words, message: `${l.label} has ${words} words; aim for ${l.target}.` });
+    }
+  }
+  return warnings;
+}
+
 module.exports = {
+  wordCount, LENGTH_LIMITS, lengthWarnings,
   AGE_GROUPS, AGE_GROUP_NAMES, CATEGORIES, normalizeAgeGroup,
   localDate, isDateString, addDays, daysBetween, quizWeekStart,
   toStory, readTimeSeconds, isUuid,

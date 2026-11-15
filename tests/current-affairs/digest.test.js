@@ -24,7 +24,7 @@ function seedStories(count, overrides = {}) {
 }
 
 describe('GET /current-affairs/digest/today', () => {
-  test('7-12 gets 6 stories, highest priority first, in the kid version with 2 new words', async () => {
+  test('7-12 gets 6 stories, highest priority first, in the kid version with 1 new word', async () => {
     seedStories(12);
     const res = await request(app).get('/current-affairs/digest/today?ageGroup=7-12');
     expect(res.status).toBe(200);
@@ -34,10 +34,7 @@ describe('GET /current-affairs/digest/today', () => {
     expect(res.body.stories[0]).toMatchObject({
       summary: 'Kid summary', whatHappened: 'Something happened in detail.', category: 'india', source: 'ISRO', read: false,
     });
-    expect(res.body.stories[0].newWords).toEqual([
-      { word: 'Rover', definition: 'A vehicle that explores.' },
-      { word: 'Lunar', definition: 'About the Moon.' },
-    ]);
+    expect(res.body.stories[0].newWords).toEqual([{ word: 'Rover', definition: 'A vehicle that explores.' }]);
     expect(res.body.stories[0].readTimeSeconds).toBeGreaterThanOrEqual(30);
   });
 
@@ -86,11 +83,19 @@ describe('GET /current-affairs/digest/today', () => {
     });
   });
 
-  test('per-age extras from the pipeline override the shared fields', async () => {
+  test('per-age extras override the shared fact; new words always come from new_word_1..3', async () => {
     seedStories(1, { age_extras: { kid: { didYouKnow: 'Kid fact', newWords: [{ word: 'Moon', definition: 'It shines at night.' }] } } });
     const res = await request(app).get('/current-affairs/digest/today?ageGroup=7-12');
     expect(res.body.stories[0].didYouKnow).toBe('Kid fact');
-    expect(res.body.stories[0].newWords).toEqual([{ word: 'Moon', definition: 'It shines at night.' }]);
+    expect(res.body.stories[0].newWords).toEqual([{ word: 'Rover', definition: 'A vehicle that explores.' }]);
+  });
+
+  test('13-15 sees the 2-3 words that are filled in; 7-12 only the first', async () => {
+    seedStories(1, { new_word_3: '', def_3: '' });
+    const teen = await request(app).get('/current-affairs/digest/today?ageGroup=13-15');
+    expect(teen.body.stories[0].newWords.map((w) => w.word)).toEqual(['Rover', 'Lunar']);
+    const kid = await request(app).get('/current-affairs/digest/today?ageGroup=7-12');
+    expect(kid.body.stories[0].newWords.map((w) => w.word)).toEqual(['Rover']);
   });
 
   test('stories waiting for review, rejected or for other days are never shown', async () => {

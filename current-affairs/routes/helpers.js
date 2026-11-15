@@ -32,6 +32,10 @@ const handle = (fn) => async (req, res) => {
     await fn(req, res);
   } catch (err) {
     console.error(`[current-affairs] ${req.method} ${req.originalUrl}:`, err.code || '', err.message);
+    if (err.code === '23505') {
+      // A unique key: in practice another story already uses this source link.
+      return res.status(409).json({ error: 'Another story already uses this source link.' });
+    }
     if (isNotSetUp(err)) {
       // The Current Affairs migration (aivorah-db 0023_current_affairs.sql) has not been run on this Supabase project.
       return res.status(503).json({

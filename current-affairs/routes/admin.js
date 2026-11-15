@@ -6,7 +6,8 @@ const supabase = require('../../services/supabase');
 const { check } = require('../services/db');
 const { requireEditor } = require('../middleware/adminAuth');
 const { handle } = require('./helpers');
-const { AGE_GROUPS, normalizeAgeGroup, localDate, isDateString, addDays, quizWeekStart } = require('../services/content');
+const { AGE_GROUPS, normalizeAgeGroup, localDate, isDateString, addDays, quizWeekStart, lengthWarnings, isUuid } = require('../services/content');
+const { urlHash, isHttpsUrl } = require('../services/sourceUrl');
 const { computeMetrics, daysBetween } = require('../services/analytics');
 
 const router = express.Router();
@@ -33,6 +34,9 @@ function storyPatch(body, { creating }) {
     patch[f] = v;
   }
   for (const f of STORY_OPTIONAL) if (body[f] !== undefined) patch[f] = text(body[f]) || null;
+  // Pictures only from an https link an editor pasted (never copied from news sites by us).
+  if (patch.image_url && !isHttpsUrl(patch.image_url)) return { error: 'image_url must be an https:// link' };
+  if (patch.source_url !== undefined) patch.source_url_hash = patch.source_url ? urlHash(patch.source_url) : null;
   if (body.category !== undefined || creating) {
     if (!CATEGORIES.includes(body.category)) return { error: `category must be one of ${CATEGORIES.join(', ')}` };
     patch.category = body.category;
@@ -102,7 +106,7 @@ router.post('/stories', handle(async (req, res) => {
     ...(req.body.publish ? reviewStamp(req, 'published') : { status: 'draft', is_true_fact: false }),
   };
   const saved = check(await supabase.from('ca_stories').insert(row).select('*'));
-  res.status(201).json({ story: Array.isArray(saved) ? saved[0] : saved });
+  res.status(201).json({ story: Array.isArray(saved) ? saved[0] : saved, warnings: lengthWarnings(row) });
 }));
 
 // PATCH /admin/stories/:id — edit any text, the date, priority or source.
@@ -112,7 +116,7 @@ router.patch('/stories/:id', handle(async (req, res) => {
   if (!Object.keys(patch).length) return bad(res, 'Nothing to change');
   const rows = check(await supabase.from('ca_stories').update(patch).eq('id', req.params.id).select('*'));
   if (!rows?.length) return res.status(404).json({ error: 'Story not found' });
-  res.json({ story: rows[0] });
+  res.json({ story: rows[0], warnings: lengthWarnings(rows[0]) });
 }));
 
 // POST /admin/stories/:id/status { status: 'published' | 'rejected' | 'review' | 'archived' | 'draft' }
@@ -198,6 +202,22 @@ router.get('/quiz', handle(async (req, res) => {
   res.json({ weekStart, ageGroup, questions: rows || [] });
 }));
 
+// A question may name the story it comes from (optional for questions an
+// editor writes). The story must exist and not be rejected; one published
+// outside the 7 days ending on the quiz's Sunday only gets a warning.
+async function checkStoryLink(storyId, weekStart) {
+  if (!storyId) return { warnings: [] };
+  if (!isUuid(storyId)) return { error: 'story_id is not a valid story id' };
+  const story = check(await supabase.from('ca_stories').select('id, status, publish_date').eq('id', storyId).maybeSingle());
+  if (!story) return { error: 'story_id does not match any story' };
+  if (story.status === 'rejected') return { error: 'story_id points to a rejected story' };
+  const from = addDays(weekStart, -6);
+  const warnings = story.publish_date < from || story.publish_date > weekStart
+    ? [{ field: 'story_id', message: `The linked story was published on ${story.publish_date}, outside this quiz's week (${from} to ${weekStart}).` }]
+    : [];
+  return { warnings };
+}
+
 // POST /admin/quiz — add a question to a week's quiz.
 router.post('/quiz', handle(async (req, res) => {
   const body = req.body || {};
@@ -207,9 +227,11 @@ router.post('/quiz', handle(async (req, res) => {
   if (!ageGroup) return;
   const { patch, error } = questionPatch(body, null, { creating: true });
   if (error) return bad(res, error);
+  const link = await checkStoryLink(patch.story_id, weekStart);
+  if (link.error) return bad(res, link.error);
   const saved = check(await supabase.from('ca_quiz_questions')
     .insert({ ...patch, week_start: weekStart, age_group: ageGroup, status: 'review' }).select('*'));
-  res.status(201).json({ question: Array.isArray(saved) ? saved[0] : saved });
+  res.status(201).json({ question: Array.isArray(saved) ? saved[0] : saved, warnings: link.warnings });
 }));
 
 router.patch('/quiz/:id', handle(async (req, res) => {
@@ -217,8 +239,10 @@ router.patch('/quiz/:id', handle(async (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Question not found' });
   const { patch, error } = questionPatch(req.body || {}, existing, { creating: false });
   if (error) return bad(res, error);
+  const link = patch.story_id ? await checkStoryLink(patch.story_id, existing.week_start) : { warnings: [] };
+  if (link.error) return bad(res, link.error);
   const rows = check(await supabase.from('ca_quiz_questions').update(patch).eq('id', req.params.id).select('*'));
-  res.json({ question: rows[0] });
+  res.json({ question: rows[0], warnings: link.warnings });
 }));
 
 router.post('/quiz/:id/status', handle(async (req, res) => {
