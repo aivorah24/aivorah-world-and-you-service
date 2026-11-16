@@ -69,6 +69,20 @@ Endpoints: `GET /current-affairs/digest/today`, `GET /current-affairs/digest/lis
 `POST /current-affairs/progress/{digest-complete,story-read,quiz-complete}`,
 `/current-affairs/admin/*` (editors only), `/current-affairs/pipeline/*` (scheduler only, below).
 
+### GK Facts — important days calendar (`/current-affairs/gk`)
+
+Public (no sign-in), no database: 390 events across the year from the
+"Important Days of India & World" GK book, bundled as
+`current-affairs/data/gk-events.json` and served by `services/gk-facts.js`.
+
+`GET /current-affairs/gk/today` (India date), `/gk/date?date=MM-DD|YYYY-MM-DD`,
+`/gk/event?name=…`, `/gk/search?q=…&top_k=5` (TF-IDF), `/gk/quiz?date=MM-DD&num=3`,
+`/gk/upcoming?days=7`, `/gk/calendar?month=1-12`.
+
+To rebuild the data from the PDF:
+`pdftotext -enc UTF-8 Important_Days_India_GK_Expanded.pdf gk.txt` then
+`python current-affairs/scripts/build-gk-events.py gk.txt current-affairs/data/gk-events.json`.
+
 ### Daily news pipeline (`current-affairs/pipeline/`)
 
 1. **Collect** (`feeds.js`, `collect.js`): the approved feeds only (The Hindu,

@@ -8,5 +8,6 @@ router.use('/quiz', require('./quiz'));
 router.use('/progress', require('./progress'));
 router.use('/admin', require('./admin'));
 router.use('/pipeline', require('./pipeline'));
+router.use('/gk', require('./gk-facts'));
 
 module.exports = router;
